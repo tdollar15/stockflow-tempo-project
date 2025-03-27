@@ -1,12 +1,31 @@
-import React from "react";
+"use client";
+
+import React, { useState } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import TransactionsList from "@/components/transactions/TransactionsList";
 import TransactionDetail from "@/components/transactions/TransactionDetail";
+import TransactionModal from "@/components/transactions/TransactionModal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { PlusCircle, ArrowLeft } from "lucide-react";
 
 export default function TransactionsPage() {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedTransactionId, setSelectedTransactionId] = useState<
+    string | null
+  >(null);
+  const [activeTab, setActiveTab] = useState("list");
+
+  const handleViewDetail = (transactionId: string) => {
+    setSelectedTransactionId(transactionId);
+    setActiveTab("detail");
+  };
+
+  const handleBackToList = () => {
+    setSelectedTransactionId(null);
+    setActiveTab("list");
+  };
+
   return (
     <DashboardLayout>
       <div className="bg-gradient-to-br from-gray-50 to-gray-200 min-h-screen">
@@ -20,13 +39,20 @@ export default function TransactionsPage() {
                 Manage and track all inventory transactions across storerooms
               </p>
             </div>
-            <Button className="transition-transform hover:scale-105 active:scale-95">
+            <Button
+              className="transition-transform hover:scale-105 active:scale-95"
+              onClick={() => setIsModalOpen(true)}
+            >
               <PlusCircle className="mr-2 h-4 w-4" />
               New Transaction
             </Button>
           </div>
 
-          <Tabs defaultValue="list" className="w-full">
+          <Tabs
+            value={activeTab}
+            onValueChange={setActiveTab}
+            className="w-full"
+          >
             <TabsList className="mb-4">
               <TabsTrigger value="list">All Transactions</TabsTrigger>
               <TabsTrigger value="pending">Pending Approvals</TabsTrigger>
@@ -34,7 +60,7 @@ export default function TransactionsPage() {
             </TabsList>
 
             <TabsContent value="list">
-              <TransactionsList />
+              <TransactionsList onViewDetail={handleViewDetail} />
             </TabsContent>
 
             <TabsContent value="pending">
@@ -110,16 +136,18 @@ export default function TransactionsPage() {
 
             <TabsContent value="detail">
               <div className="mb-4">
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={handleBackToList}>
                   <ArrowLeft className="mr-2 h-4 w-4" />
                   Back to List
                 </Button>
               </div>
-              <TransactionDetail />
+              <TransactionDetail id={selectedTransactionId || undefined} />
             </TabsContent>
           </Tabs>
         </div>
       </div>
+
+      <TransactionModal open={isModalOpen} onOpenChange={setIsModalOpen} />
     </DashboardLayout>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Table,
   TableHeader,
@@ -35,83 +35,76 @@ import {
   Search,
   Calendar,
   ArrowUpDown,
+  Loader2,
 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 interface Transaction {
   id: string;
+  transaction_number: string;
   type: "receipt" | "issuance" | "transfer" | "swap";
-  itemName: string;
-  quantity: number;
-  sourceStoreroom?: string;
-  destStoreroom?: string;
   status: "pending" | "approved" | "rejected";
-  createdBy: string;
-  createdAt: string;
+  source_storeroom_id?: string;
+  dest_storeroom_id?: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  notes?: string;
+  reference_number?: string;
+  supplier_name?: string;
+  source_storeroom?: { name: string };
+  dest_storeroom?: { name: string };
+  transaction_items?: {
+    id: string;
+    item_id: string;
+    quantity: number;
+    unit_price?: number;
+    direction?: string;
+    purpose?: string;
+    item?: { name: string };
+  }[];
 }
 
 interface TransactionsListProps {
-  transactions?: Transaction[];
+  onViewDetail?: (transactionId: string) => void;
 }
 
-const TransactionsList = ({
-  transactions = [
-    {
-      id: "TX-001",
-      type: "receipt",
-      itemName: "Laptop Dell XPS 13",
-      quantity: 10,
-      destStoreroom: "Main Warehouse",
-      status: "approved",
-      createdBy: "John Doe",
-      createdAt: "2023-06-15T10:30:00Z",
-    },
-    {
-      id: "TX-002",
-      type: "issuance",
-      itemName: "Office Chair",
-      quantity: 5,
-      sourceStoreroom: "Main Warehouse",
-      status: "pending",
-      createdBy: "Jane Smith",
-      createdAt: "2023-06-16T14:45:00Z",
-    },
-    {
-      id: "TX-003",
-      type: "transfer",
-      itemName: "Printer Cartridges",
-      quantity: 20,
-      sourceStoreroom: "Main Warehouse",
-      destStoreroom: "Office Supplies",
-      status: "pending",
-      createdBy: "Mike Johnson",
-      createdAt: "2023-06-17T09:15:00Z",
-    },
-    {
-      id: "TX-004",
-      type: "swap",
-      itemName: 'Monitor 24"',
-      quantity: 3,
-      sourceStoreroom: "IT Department",
-      destStoreroom: "Marketing Department",
-      status: "rejected",
-      createdBy: "Sarah Williams",
-      createdAt: "2023-06-18T11:20:00Z",
-    },
-    {
-      id: "TX-005",
-      type: "receipt",
-      itemName: "Wireless Keyboards",
-      quantity: 15,
-      destStoreroom: "IT Department",
-      status: "approved",
-      createdBy: "Robert Brown",
-      createdAt: "2023-06-19T16:10:00Z",
-    },
-  ],
-}: TransactionsListProps) => {
+const TransactionsList = ({ onViewDetail }: TransactionsListProps) => {
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  useEffect(() => {
+    fetchTransactions();
+  }, []);
+
+  const fetchTransactions = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("transactions")
+        .select(
+          `
+          *,
+          source_storeroom:storerooms!transactions_source_storeroom_id_fkey(name),
+          dest_storeroom:storerooms!transactions_dest_storeroom_id_fkey(name),
+          transaction_items(*, item:items(name))
+        `,
+        )
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setTransactions(data || []);
+    } catch (err: any) {
+      console.error("Error fetching transactions:", err);
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Format date for display
   const formatDate = (dateString: string) => {
@@ -153,12 +146,50 @@ const TransactionsList = ({
     }
   };
 
+  // Get the main item name for display
+  const getMainItemName = (transaction: Transaction) => {
+    if (
+      !transaction.transaction_items ||
+      transaction.transaction_items.length === 0
+    ) {
+      return "No items";
+    }
+
+    const firstItem = transaction.transaction_items[0];
+    const itemName = firstItem.item?.name || "Unknown item";
+
+    if (transaction.transaction_items.length > 1) {
+      return `${itemName} + ${transaction.transaction_items.length - 1} more`;
+    }
+
+    return itemName;
+  };
+
+  // Get total quantity for display
+  const getTotalQuantity = (transaction: Transaction) => {
+    if (
+      !transaction.transaction_items ||
+      transaction.transaction_items.length === 0
+    ) {
+      return 0;
+    }
+
+    return transaction.transaction_items.reduce(
+      (sum, item) => sum + item.quantity,
+      0,
+    );
+  };
+
   // Filter transactions based on search query and filters
   const filteredTransactions = transactions.filter((transaction) => {
+    const mainItemName = getMainItemName(transaction);
+
     const matchesSearch =
-      transaction.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      transaction.itemName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      transaction.createdBy.toLowerCase().includes(searchQuery.toLowerCase());
+      transaction.transaction_number
+        .toLowerCase()
+        .includes(searchQuery.toLowerCase()) ||
+      mainItemName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      transaction.created_by.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesType =
       typeFilter === "all" ? true : transaction.type === typeFilter;
@@ -168,16 +199,43 @@ const TransactionsList = ({
     return matchesSearch && matchesType && matchesStatus;
   });
 
+  const handleViewDetail = (transactionId: string) => {
+    if (onViewDetail) {
+      onViewDetail(transactionId);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="w-full p-6 rounded-lg bg-white bg-opacity-10 backdrop-blur-md border border-gray-200 border-opacity-20 shadow-lg flex justify-center items-center h-64">
+        <div className="flex flex-col items-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+          <p>Loading transactions...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="w-full p-6 rounded-lg bg-white bg-opacity-10 backdrop-blur-md border border-red-200 border-opacity-20 shadow-lg">
+        <div className="text-red-500 text-center">
+          <p>Error loading transactions: {error}</p>
+          <Button
+            variant="outline"
+            className="mt-4"
+            onClick={() => fetchTransactions()}
+          >
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full p-6 rounded-lg bg-white bg-opacity-10 backdrop-blur-md border border-gray-200 border-opacity-20 shadow-lg">
       <div className="flex flex-col space-y-4">
-        <div className="flex justify-between items-center">
-          <h2 className="text-2xl font-semibold">Transactions</h2>
-          <Button className="transition-transform hover:scale-105 active:scale-95">
-            Create Transaction
-          </Button>
-        </div>
-
         {/* Filters and Search */}
         <div className="flex flex-col md:flex-row gap-4 mb-4">
           <div className="relative flex-1">
@@ -216,8 +274,13 @@ const TransactionsList = ({
               </SelectContent>
             </Select>
 
-            <Button variant="outline" size="icon" className="h-9 w-9">
-              <Calendar className="h-4 w-4" />
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-9 w-9"
+              onClick={() => fetchTransactions()}
+            >
+              <Filter className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -258,7 +321,7 @@ const TransactionsList = ({
                     className="transition-all hover:bg-opacity-20 hover:translate-y-[-2px] hover:shadow-md"
                   >
                     <TableCell className="font-medium">
-                      {transaction.id}
+                      {transaction.transaction_number}
                     </TableCell>
                     <TableCell>
                       <Badge variant={getTypeBadgeVariant(transaction.type)}>
@@ -266,16 +329,16 @@ const TransactionsList = ({
                           transaction.type.slice(1)}
                       </Badge>
                     </TableCell>
-                    <TableCell>{transaction.itemName}</TableCell>
-                    <TableCell>{transaction.quantity}</TableCell>
+                    <TableCell>{getMainItemName(transaction)}</TableCell>
+                    <TableCell>{getTotalQuantity(transaction)}</TableCell>
                     <TableCell>
                       {transaction.type === "receipt" &&
-                        transaction.destStoreroom}
+                        transaction.dest_storeroom?.name}
                       {transaction.type === "issuance" &&
-                        transaction.sourceStoreroom}
+                        transaction.source_storeroom?.name}
                       {(transaction.type === "transfer" ||
                         transaction.type === "swap") &&
-                        `${transaction.sourceStoreroom} → ${transaction.destStoreroom}`}
+                        `${transaction.source_storeroom?.name || "Unknown"} → ${transaction.dest_storeroom?.name || "Unknown"}`}
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -285,8 +348,8 @@ const TransactionsList = ({
                           transaction.status.slice(1)}
                       </Badge>
                     </TableCell>
-                    <TableCell>{formatDate(transaction.createdAt)}</TableCell>
-                    <TableCell>{transaction.createdBy}</TableCell>
+                    <TableCell>{formatDate(transaction.created_at)}</TableCell>
+                    <TableCell>{transaction.created_by}</TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -300,7 +363,10 @@ const TransactionsList = ({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem className="cursor-pointer">
+                          <DropdownMenuItem
+                            className="cursor-pointer"
+                            onClick={() => handleViewDetail(transaction.id)}
+                          >
                             <Eye className="mr-2 h-4 w-4" />
                             View Details
                           </DropdownMenuItem>
