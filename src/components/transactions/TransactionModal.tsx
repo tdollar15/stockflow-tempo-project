@@ -52,7 +52,7 @@ const TransactionModal = ({
 
       if (transactionError) throw transactionError;
 
-      // Add transaction items
+      // Add transaction items - now supporting batch items
       const transactionItems = values.items.map((item: any) => ({
         transaction_id: transactionData.id,
         item_id: item.itemId,
@@ -111,7 +111,7 @@ const TransactionModal = ({
 
       if (transactionError) throw transactionError;
 
-      // Add transaction items
+      // Add transaction items - now supporting batch items
       const transactionItems = values.items.map((item: any) => ({
         transaction_id: transactionData.id,
         item_id: item.itemId,

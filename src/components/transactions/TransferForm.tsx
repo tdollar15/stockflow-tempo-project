@@ -105,7 +105,7 @@ const TransferForm = ({
     },
   });
 
-  const { fields, append, remove } = form.control._formValues.items;
+  const { fields, append, remove } = form.control._fields.items || [];
 
   const handleSubmit = (values: TransferFormValues) => {
     onSubmit(values);

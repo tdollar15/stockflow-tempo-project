@@ -120,13 +120,13 @@ const SwapForm = ({
     fields: outgoingFields,
     append: appendOutgoing,
     remove: removeOutgoing,
-  } = form.control._formValues.outgoingItems;
+  } = form.control._fields.outgoingItems || [];
 
   const {
     fields: incomingFields,
     append: appendIncoming,
     remove: removeIncoming,
-  } = form.control._formValues.incomingItems;
+  } = form.control._fields.incomingItems || [];
 
   const handleSubmit = (values: SwapFormValues) => {
     onSubmit(values);

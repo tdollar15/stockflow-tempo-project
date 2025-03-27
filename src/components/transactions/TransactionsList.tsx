@@ -159,7 +159,7 @@ const TransactionsList = ({ onViewDetail }: TransactionsListProps) => {
     const itemName = firstItem.item?.name || "Unknown item";
 
     if (transaction.transaction_items.length > 1) {
-      return `${itemName} + ${transaction.transaction_items.length - 1} more`;
+      return `${itemName} + ${transaction.transaction_items.length - 1} more items`;
     }
 
     return itemName;
@@ -329,7 +329,36 @@ const TransactionsList = ({ onViewDetail }: TransactionsListProps) => {
                           transaction.type.slice(1)}
                       </Badge>
                     </TableCell>
-                    <TableCell>{getMainItemName(transaction)}</TableCell>
+                    <TableCell>
+                      <div className="group relative cursor-pointer">
+                        <span>{getMainItemName(transaction)}</span>
+                        {transaction.transaction_items &&
+                          transaction.transaction_items.length > 1 && (
+                            <div className="absolute left-0 top-full z-10 mt-2 hidden w-64 rounded-md bg-white p-2 shadow-lg group-hover:block">
+                              <div className="text-sm font-medium mb-1">
+                                Items in this transaction:
+                              </div>
+                              <ul className="text-xs space-y-1">
+                                {transaction.transaction_items.map(
+                                  (item, idx) => (
+                                    <li
+                                      key={idx}
+                                      className="flex justify-between"
+                                    >
+                                      <span>
+                                        {item.item?.name || "Unknown item"}
+                                      </span>
+                                      <span className="font-medium">
+                                        Qty: {item.quantity}
+                                      </span>
+                                    </li>
+                                  ),
+                                )}
+                              </ul>
+                            </div>
+                          )}
+                      </div>
+                    </TableCell>
                     <TableCell>{getTotalQuantity(transaction)}</TableCell>
                     <TableCell>
                       {transaction.type === "receipt" &&

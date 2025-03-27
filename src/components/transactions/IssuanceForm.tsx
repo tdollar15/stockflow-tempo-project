@@ -108,7 +108,7 @@ const IssuanceForm = ({
     },
   });
 
-  const { fields, append, remove } = form.control._formValues.items;
+  const { fields, append, remove } = form.control._fields.items || [];
 
   const handleSubmit = (values: IssuanceFormValues) => {
     onSubmit(values);
@@ -259,7 +259,7 @@ const IssuanceForm = ({
                         variant="ghost"
                         size="icon"
                         className="absolute right-2 top-2"
-                        onClick={() => remove(index)}
+                        onClick={() => fields.length > 1 && remove(index)}
                       >
                         <X className="h-4 w-4" />
                       </Button>
