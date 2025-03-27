@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import ActionCards from "@/components/dashboard/ActionCards";
 import InventoryStatusChart from "@/components/dashboard/InventoryStatusChart";
@@ -8,6 +8,7 @@ import PendingApprovals from "@/components/dashboard/PendingApprovals";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BarChart3, TrendingUp, AlertCircle, Package } from "lucide-react";
+import { getInventoryItems, getStorerooms } from "@/lib/supabase";
 
 interface DashboardPageProps {
   userRole?: "admin" | "supervisor" | "storeman" | "clerk" | "supplier";
@@ -21,13 +22,42 @@ export default function DashboardPage({
   userAvatar = "https://api.dicebear.com/7.x/avataaars/svg?seed=john",
 }: DashboardPageProps) {
   const [activeTab, setActiveTab] = useState("overview");
+  const [inventoryData, setInventoryData] = useState([]);
+  const [storeroomData, setStoreroomData] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // Mock data for summary cards
+  // Fetch data from Supabase
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        setIsLoading(true);
+        const [inventory, storerooms] = await Promise.all([
+          getInventoryItems(),
+          getStorerooms(),
+        ]);
+
+        setInventoryData(inventory || []);
+        setStoreroomData(storerooms || []);
+      } catch (err) {
+        console.error("Error fetching dashboard data:", err);
+        setError(err.message);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchData();
+  }, []);
+
+  // Calculate summary data from real data
   const summaryData = {
-    totalItems: 1248,
-    lowStockItems: 32,
-    pendingTransactions: 15,
-    recentActivity: 87,
+    totalItems: inventoryData.length || 0,
+    lowStockItems:
+      inventoryData.filter((item) => item.quantity <= (item.min_quantity || 0))
+        .length || 0,
+    pendingTransactions: 15, // This would come from a transactions API call in a real implementation
+    recentActivity: 87, // This would come from an activity log API call in a real implementation
   };
 
   const handleApproveTransaction = (id: string) => {
@@ -134,11 +164,16 @@ export default function DashboardPage({
           </TabsList>
           <TabsContent value="overview" className="space-y-4 mt-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <InventoryStatusChart />
+              <InventoryStatusChart
+                inventoryData={inventoryData}
+                storeroomData={storeroomData}
+                isLoading={isLoading}
+              />
               <PendingApprovals
                 onApprove={handleApproveTransaction}
                 onReject={handleRejectTransaction}
                 onViewDetails={handleViewTransactionDetails}
+                isLoading={isLoading}
               />
             </div>
           </TabsContent>
@@ -147,6 +182,7 @@ export default function DashboardPage({
               onApprove={handleApproveTransaction}
               onReject={handleRejectTransaction}
               onViewDetails={handleViewTransactionDetails}
+              isLoading={isLoading}
             />
           </TabsContent>
         </Tabs>

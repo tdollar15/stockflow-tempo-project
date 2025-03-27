@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Card,
   CardHeader,
@@ -20,6 +20,8 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Eye, EyeOff, Lock, Mail, User } from "lucide-react";
+import { signIn } from "@/lib/supabase";
+import { useToast } from "../ui/use-toast";
 
 interface LoginFormProps {
   onSubmit?: (data: { email: string; password: string; role: string }) => void;
@@ -28,16 +30,76 @@ interface LoginFormProps {
 
 const LoginForm = ({
   onSubmit = () => {},
-  isLoading = false,
+  isLoading: externalIsLoading = false,
 }: LoginFormProps) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("clerk");
   const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(externalIsLoading);
+  const [roles, setRoles] = useState<{ id: string; name: string }[]>([
+    { id: "admin", name: "Admin" },
+    { id: "supervisor", name: "Supervisor" },
+    { id: "storeman", name: "Storeman" },
+    { id: "clerk", name: "Clerk" },
+    { id: "supplier_driver", name: "Supplier Driver" },
+    { id: "supplier_supervisor", name: "Supplier Supervisor" },
+  ]);
+  const { toast } = useToast();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Fetch roles from Supabase
+  useEffect(() => {
+    const fetchRoles = async () => {
+      try {
+        // In a real implementation, you would fetch roles from Supabase
+        // For now, we'll use the hardcoded roles above
+        // const { data } = await supabase.from('roles').select('*');
+        // if (data) setRoles(data);
+      } catch (error) {
+        console.error("Error fetching roles:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load user roles. Please try again later.",
+          variant: "destructive",
+        });
+      }
+    };
+
+    fetchRoles();
+  }, [toast]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({ email, password, role });
+    setIsLoading(true);
+
+    try {
+      // In a real implementation, we would use Supabase Auth
+      // const { user } = await signIn(email, password);
+      // if (user) {
+      //   // Get user role from the users table
+      //   const { data: userData } = await supabase
+      //     .from('users')
+      //     .select('role')
+      //     .eq('id', user.id)
+      //     .single();
+      //
+      //   // Use the role from the database or fallback to the selected role
+      //   const userRole = userData?.role || role;
+      //   onSubmit({ email, password, role: userRole });
+      // }
+
+      // For now, we'll just pass the selected role
+      onSubmit({ email, password, role });
+    } catch (error: any) {
+      console.error("Login error:", error);
+      toast({
+        title: "Login Failed",
+        description: error.message || "Invalid credentials. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const togglePasswordVisibility = () => {
@@ -107,16 +169,11 @@ const LoginForm = ({
                     <SelectValue placeholder="Select your role" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="supervisor">Supervisor</SelectItem>
-                    <SelectItem value="storeman">Storeman</SelectItem>
-                    <SelectItem value="clerk">Clerk</SelectItem>
-                    <SelectItem value="supplier_driver">
-                      Supplier Driver
-                    </SelectItem>
-                    <SelectItem value="supplier_supervisor">
-                      Supplier Supervisor
-                    </SelectItem>
+                    {roles.map((roleOption) => (
+                      <SelectItem key={roleOption.id} value={roleOption.id}>
+                        {roleOption.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

@@ -1,27 +1,18 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { ArrowRight, PackagePlus, Send, Repeat, RefreshCw } from "lucide-react";
-
-import { Button } from "../ui/button";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
-} from "../ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { Input } from "../ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../ui/select";
+} from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import {
   Form,
   FormControl,
@@ -30,50 +21,52 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from "../ui/form";
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  RefreshCw,
+  Send,
+} from "lucide-react";
 
-type TransactionType = "receipt" | "issuance" | "transfer" | "swap";
-
-interface TransactionFormValues {
-  type: TransactionType;
-  itemId: string;
-  quantity: number;
-  sourceStoreroomId?: string;
-  destStoreroomId?: string;
-  justification?: string;
-}
-
-const defaultItems = [
-  { id: "item1", name: "Laptop Dell XPS 15" },
-  { id: "item2", name: 'Monitor 27" 4K' },
-  { id: "item3", name: "Wireless Keyboard" },
-  { id: "item4", name: "Wireless Mouse" },
-  { id: "item5", name: "USB-C Dock" },
+// Mock data - will be replaced with actual data from Supabase
+const items = [
+  { id: "1", name: "Laptop" },
+  { id: "2", name: "Monitor" },
+  { id: "3", name: "Keyboard" },
+  { id: "4", name: "Mouse" },
 ];
 
-const defaultStorerooms = [
-  { id: "store1", name: "Main Warehouse" },
-  { id: "store2", name: "IT Department" },
-  { id: "store3", name: "Engineering" },
-  { id: "store4", name: "Sales Office" },
+const storerooms = [
+  { id: "1", name: "Main Warehouse" },
+  { id: "2", name: "IT Department" },
+  { id: "3", name: "Office Supplies" },
+  { id: "4", name: "Electronics" },
 ];
 
-interface TransactionInitiatorProps {
-  items?: typeof defaultItems;
-  storerooms?: typeof defaultStorerooms;
-  onSubmit?: (values: TransactionFormValues) => void;
-}
+// Form schema
+const formSchema = z.object({
+  itemId: z.string().min(1, "Item is required"),
+  quantity: z.number().min(1, "Quantity must be at least 1"),
+  sourceStoreroomId: z.string().optional(),
+  destStoreroomId: z.string().optional(),
+  justification: z.string().optional(),
+});
 
-const TransactionInitiator = ({
-  items = defaultItems,
-  storerooms = defaultStorerooms,
-  onSubmit = (values) => console.log("Transaction submitted:", values),
-}: TransactionInitiatorProps) => {
-  const [activeTab, setActiveTab] = useState<TransactionType>("receipt");
+export const TransactionInitiator = () => {
+  const [transactionType, setTransactionType] = useState("receipt");
 
-  const form = useForm<TransactionFormValues>({
+  const form = useForm({
+    resolver: zodResolver(formSchema),
     defaultValues: {
-      type: activeTab,
       itemId: "",
       quantity: 1,
       sourceStoreroomId: "",
@@ -82,46 +75,34 @@ const TransactionInitiator = ({
     },
   });
 
-  const handleTabChange = (value: string) => {
-    setActiveTab(value as TransactionType);
-    form.setValue("type", value as TransactionType);
-  };
-
-  const handleSubmit = (values: TransactionFormValues) => {
-    onSubmit({
-      ...values,
-      type: activeTab,
-    });
-    form.reset();
+  const handleSubmit = (values: z.infer<typeof formSchema>) => {
+    console.log({ ...values, transactionType });
+    // Here we would submit the transaction to the backend
+    // and handle the response
   };
 
   return (
-    <Card className="w-full bg-white bg-opacity-10 backdrop-blur-md border border-gray-200 border-opacity-20 transition-all duration-300 hover:shadow-lg">
+    <Card className="w-full bg-white dark:bg-gray-950 shadow-lg">
       <CardHeader>
-        <CardTitle className="text-xl font-bold">
-          Initiate Transaction
-        </CardTitle>
-        <CardDescription>
-          Create a new inventory transaction based on your requirements
-        </CardDescription>
+        <CardTitle className="text-xl font-bold">New Transaction</CardTitle>
       </CardHeader>
       <CardContent>
         <Tabs
           defaultValue="receipt"
-          value={activeTab}
-          onValueChange={handleTabChange}
+          onValueChange={(value) => setTransactionType(value)}
+          className="w-full"
         >
-          <TabsList className="grid grid-cols-4 mb-6">
+          <TabsList className="grid grid-cols-4 mb-4">
             <TabsTrigger value="receipt" className="flex items-center gap-2">
-              <PackagePlus className="h-4 w-4" />
+              <ArrowDownToLine className="h-4 w-4" />
               Receipt
             </TabsTrigger>
             <TabsTrigger value="issuance" className="flex items-center gap-2">
-              <Send className="h-4 w-4" />
+              <ArrowUpFromLine className="h-4 w-4" />
               Issuance
             </TabsTrigger>
             <TabsTrigger value="transfer" className="flex items-center gap-2">
-              <ArrowRight className="h-4 w-4" />
+              <Send className="h-4 w-4" />
               Transfer
             </TabsTrigger>
             <TabsTrigger value="swap" className="flex items-center gap-2">

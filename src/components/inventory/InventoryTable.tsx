@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Search,
   Filter,
@@ -9,6 +9,8 @@ import {
   Plus,
   Download,
   Printer,
+  AlertCircle,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,7 +39,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -47,6 +48,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/ui/use-toast";
+import {
+  getInventoryItems,
+  getStorerooms,
+  getCategories,
+} from "@/lib/supabase";
+import { format } from "date-fns";
 
 interface InventoryItem {
   id: string;
@@ -68,11 +76,14 @@ interface InventoryTableProps {
 }
 
 const InventoryTable = ({
-  items = mockInventoryItems,
-  storerooms = mockStorerooms,
-  categories = mockCategories,
+  items: initialItems = [],
+  storerooms: initialStorerooms = [],
+  categories: initialCategories = [],
   onInitiateTransaction = () => {},
 }: InventoryTableProps) => {
+  const [items, setItems] = useState<InventoryItem[]>(initialItems);
+  const [storerooms, setStorerooms] = useState<string[]>(initialStorerooms);
+  const [categories, setCategories] = useState<string[]>(initialCategories);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedStoreroom, setSelectedStoreroom] = useState<string>("all");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
@@ -82,6 +93,75 @@ const InventoryTable = ({
   } | null>(null);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  // Fetch data from Supabase
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        // Fetch storerooms
+        const storeroomsData = await getStorerooms();
+        if (storeroomsData) {
+          setStorerooms(storeroomsData.map((s) => s.name));
+        }
+
+        // Fetch categories
+        const categoriesData = await getCategories();
+        if (categoriesData) {
+          setCategories(categoriesData.map((c) => c.name));
+        }
+
+        // Fetch inventory items
+        const inventoryData = await getInventoryItems();
+        if (inventoryData) {
+          // Transform the data to match our InventoryItem interface
+          const transformedItems: InventoryItem[] = inventoryData.map(
+            (item) => {
+              // Determine status based on quantity and min_quantity
+              let status: "In Stock" | "Low Stock" | "Out of Stock" =
+                "In Stock";
+              if (item.quantity <= 0) {
+                status = "Out of Stock";
+              } else if (item.quantity <= item.min_quantity) {
+                status = "Low Stock";
+              }
+
+              return {
+                id: item.id,
+                name: item.items?.name || "",
+                sku: item.items?.sku || "",
+                category: item.items?.category_id || "", // This should be the category name in a real implementation
+                quantity: item.quantity,
+                unit: item.items?.unit || "",
+                storeroom: item.storerooms?.name || "",
+                status,
+                lastUpdated: format(new Date(item.last_updated), "yyyy-MM-dd"),
+              };
+            },
+          );
+
+          setItems(transformedItems);
+        }
+      } catch (err) {
+        console.error("Error fetching inventory data:", err);
+        setError("Failed to load inventory data. Please try again later.");
+        toast({
+          title: "Error",
+          description: "Failed to load inventory data. Please try again later.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [toast]);
 
   // Filter items based on search term, storeroom, and category
   const filteredItems = items.filter((item) => {
@@ -145,6 +225,32 @@ const InventoryTable = ({
         return "bg-gray-100 text-gray-800 hover:bg-gray-100";
     }
   };
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="w-full h-96 flex items-center justify-center bg-white bg-opacity-50 backdrop-blur-md rounded-lg p-6 border border-gray-200 border-opacity-20 shadow-lg">
+        <div className="flex flex-col items-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+          <p>Loading inventory data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="w-full h-96 flex items-center justify-center bg-white bg-opacity-50 backdrop-blur-md rounded-lg p-6 border border-gray-200 border-opacity-20 shadow-lg">
+        <div className="flex flex-col items-center text-center">
+          <AlertCircle className="h-8 w-8 text-red-500 mb-2" />
+          <h3 className="text-lg font-medium mb-2">Error Loading Data</h3>
+          <p className="text-gray-500 mb-4">{error}</p>
+          <Button onClick={() => window.location.reload()}>Retry</Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full space-y-4 bg-white bg-opacity-50 backdrop-blur-md rounded-lg p-6 border border-gray-200 border-opacity-20 shadow-lg">
@@ -518,136 +624,5 @@ const InventoryTable = ({
     </div>
   );
 };
-
-// Mock data for default props
-const mockStorerooms = [
-  "Main Warehouse",
-  "North Storeroom",
-  "South Storeroom",
-  "East Storeroom",
-  "West Storeroom",
-];
-
-const mockCategories = [
-  "Electronics",
-  "Office Supplies",
-  "Furniture",
-  "Raw Materials",
-  "Tools",
-  "Safety Equipment",
-];
-
-const mockInventoryItems: InventoryItem[] = [
-  {
-    id: "1",
-    name: "Laptop Computer",
-    sku: "ELEC-001",
-    category: "Electronics",
-    quantity: 24,
-    unit: "pcs",
-    storeroom: "Main Warehouse",
-    status: "In Stock",
-    lastUpdated: "2023-10-15",
-  },
-  {
-    id: "2",
-    name: "Office Chair",
-    sku: "FURN-102",
-    category: "Furniture",
-    quantity: 15,
-    unit: "pcs",
-    storeroom: "North Storeroom",
-    status: "In Stock",
-    lastUpdated: "2023-10-12",
-  },
-  {
-    id: "3",
-    name: "Printer Paper",
-    sku: "OFSP-205",
-    category: "Office Supplies",
-    quantity: 5,
-    unit: "boxes",
-    storeroom: "South Storeroom",
-    status: "Low Stock",
-    lastUpdated: "2023-10-14",
-  },
-  {
-    id: "4",
-    name: "Steel Pipes",
-    sku: "RAWM-310",
-    category: "Raw Materials",
-    quantity: 0,
-    unit: "meters",
-    storeroom: "East Storeroom",
-    status: "Out of Stock",
-    lastUpdated: "2023-10-10",
-  },
-  {
-    id: "5",
-    name: "Safety Helmets",
-    sku: "SAFE-405",
-    category: "Safety Equipment",
-    quantity: 32,
-    unit: "pcs",
-    storeroom: "West Storeroom",
-    status: "In Stock",
-    lastUpdated: "2023-10-13",
-  },
-  {
-    id: "6",
-    name: "Power Drill",
-    sku: "TOOL-512",
-    category: "Tools",
-    quantity: 8,
-    unit: "pcs",
-    storeroom: "Main Warehouse",
-    status: "In Stock",
-    lastUpdated: "2023-10-11",
-  },
-  {
-    id: "7",
-    name: "Desk Lamp",
-    sku: "ELEC-125",
-    category: "Electronics",
-    quantity: 3,
-    unit: "pcs",
-    storeroom: "North Storeroom",
-    status: "Low Stock",
-    lastUpdated: "2023-10-09",
-  },
-  {
-    id: "8",
-    name: "Whiteboard Markers",
-    sku: "OFSP-230",
-    category: "Office Supplies",
-    quantity: 42,
-    unit: "pcs",
-    storeroom: "South Storeroom",
-    status: "In Stock",
-    lastUpdated: "2023-10-08",
-  },
-  {
-    id: "9",
-    name: "Conference Table",
-    sku: "FURN-150",
-    category: "Furniture",
-    quantity: 0,
-    unit: "pcs",
-    storeroom: "Main Warehouse",
-    status: "Out of Stock",
-    lastUpdated: "2023-10-07",
-  },
-  {
-    id: "10",
-    name: "First Aid Kit",
-    sku: "SAFE-420",
-    category: "Safety Equipment",
-    quantity: 12,
-    unit: "kits",
-    storeroom: "West Storeroom",
-    status: "In Stock",
-    lastUpdated: "2023-10-06",
-  },
-];
 
 export default InventoryTable;

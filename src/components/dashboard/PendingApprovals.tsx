@@ -1,12 +1,13 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   CheckCircle,
   Clock,
   XCircle,
   ArrowRight,
   AlertCircle,
+  Loader2,
 } from "lucide-react";
 import {
   Card,
@@ -18,6 +19,7 @@ import {
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Avatar, AvatarImage, AvatarFallback } from "../ui/avatar";
+import { supabase } from "@/lib/supabase";
 
 interface Transaction {
   id: string;
@@ -40,58 +42,189 @@ interface PendingApprovalsProps {
   onApprove?: (id: string) => void;
   onReject?: (id: string) => void;
   onViewDetails?: (id: string) => void;
+  isLoading?: boolean;
 }
 
 const PendingApprovals = ({
-  transactions = [
-    {
-      id: "tx-001",
-      type: "receipt",
-      itemName: "Laptop Chargers",
-      quantity: 25,
-      status: "pending",
-      createdBy: {
-        name: "John Doe",
-        avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=john",
-        initials: "JD",
-      },
-      createdAt: "2023-06-15T09:30:00Z",
-      destStoreroom: "Main Warehouse",
-    },
-    {
-      id: "tx-002",
-      type: "transfer",
-      itemName: "Office Chairs",
-      quantity: 10,
-      status: "pending",
-      createdBy: {
-        name: "Jane Smith",
-        avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=jane",
-        initials: "JS",
-      },
-      createdAt: "2023-06-14T14:45:00Z",
-      sourceStoreroom: "Main Warehouse",
-      destStoreroom: "Office Building B",
-    },
-    {
-      id: "tx-003",
-      type: "issuance",
-      itemName: "Printer Ink Cartridges",
-      quantity: 15,
-      status: "pending",
-      createdBy: {
-        name: "Robert Johnson",
-        avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=robert",
-        initials: "RJ",
-      },
-      createdAt: "2023-06-14T11:20:00Z",
-      sourceStoreroom: "Supply Closet",
-    },
-  ],
+  transactions: initialTransactions,
   onApprove = () => {},
   onReject = () => {},
   onViewDetails = () => {},
+  isLoading: initialLoading = false,
 }: PendingApprovalsProps) => {
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isLoading, setIsLoading] = useState(initialLoading);
+
+  useEffect(() => {
+    // If transactions are provided as props, use them
+    if (initialTransactions) {
+      setTransactions(initialTransactions);
+      return;
+    }
+
+    async function fetchPendingApprovals() {
+      try {
+        setIsLoading(true);
+        // Try to fetch real pending approvals from Supabase
+        const { data, error } = await supabase
+          .from("transactions")
+          .select(
+            `
+            id,
+            transaction_number,
+            type,
+            status,
+            created_at,
+            created_by,
+            source_storeroom_id,
+            dest_storeroom_id,
+            users!created_by(name),
+            storerooms!source_storeroom_id(name),
+            storerooms!dest_storeroom_id(name),
+            transaction_items(id, quantity, item_id, items(name))
+          `,
+          )
+          .eq("status", "pending");
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          // Transform the data to match our component's expected format
+          const formattedData: Transaction[] = data.map((item) => {
+            const userName = item.users?.name || "Unknown User";
+            const initials = userName
+              .split(" ")
+              .map((n) => n[0])
+              .join("");
+
+            return {
+              id: item.id,
+              type: item.type as "receipt" | "issuance" | "transfer" | "swap",
+              itemName:
+                item.transaction_items?.[0]?.items?.name || "Multiple Items",
+              quantity:
+                item.transaction_items?.reduce(
+                  (sum, ti) => sum + ti.quantity,
+                  0,
+                ) || 0,
+              status: item.status as "pending" | "approved" | "rejected",
+              createdBy: {
+                name: userName,
+                avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userName}`,
+                initials: initials,
+              },
+              createdAt: item.created_at,
+              sourceStoreroom: item.storerooms?.name,
+              destStoreroom: item.storerooms_dest_storeroom_id?.name,
+            };
+          });
+
+          setTransactions(formattedData);
+        } else {
+          // If no data, use mock data for demonstration
+          setTransactions([
+            {
+              id: "tx-001",
+              type: "receipt",
+              itemName: "Laptop Chargers",
+              quantity: 25,
+              status: "pending",
+              createdBy: {
+                name: "John Doe",
+                avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=john",
+                initials: "JD",
+              },
+              createdAt: "2023-06-15T09:30:00Z",
+              destStoreroom: "Main Warehouse",
+            },
+            {
+              id: "tx-002",
+              type: "transfer",
+              itemName: "Office Chairs",
+              quantity: 10,
+              status: "pending",
+              createdBy: {
+                name: "Jane Smith",
+                avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=jane",
+                initials: "JS",
+              },
+              createdAt: "2023-06-14T14:45:00Z",
+              sourceStoreroom: "Main Warehouse",
+              destStoreroom: "Office Building B",
+            },
+            {
+              id: "tx-003",
+              type: "issuance",
+              itemName: "Printer Ink Cartridges",
+              quantity: 15,
+              status: "pending",
+              createdBy: {
+                name: "Robert Johnson",
+                avatar:
+                  "https://api.dicebear.com/7.x/avataaars/svg?seed=robert",
+                initials: "RJ",
+              },
+              createdAt: "2023-06-14T11:20:00Z",
+              sourceStoreroom: "Supply Closet",
+            },
+          ]);
+        }
+      } catch (error) {
+        console.error("Error fetching pending approvals:", error);
+        // Fallback to mock data on error
+        setTransactions([
+          {
+            id: "tx-001",
+            type: "receipt",
+            itemName: "Laptop Chargers",
+            quantity: 25,
+            status: "pending",
+            createdBy: {
+              name: "John Doe",
+              avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=john",
+              initials: "JD",
+            },
+            createdAt: "2023-06-15T09:30:00Z",
+            destStoreroom: "Main Warehouse",
+          },
+          {
+            id: "tx-002",
+            type: "transfer",
+            itemName: "Office Chairs",
+            quantity: 10,
+            status: "pending",
+            createdBy: {
+              name: "Jane Smith",
+              avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=jane",
+              initials: "JS",
+            },
+            createdAt: "2023-06-14T14:45:00Z",
+            sourceStoreroom: "Main Warehouse",
+            destStoreroom: "Office Building B",
+          },
+          {
+            id: "tx-003",
+            type: "issuance",
+            itemName: "Printer Ink Cartridges",
+            quantity: 15,
+            status: "pending",
+            createdBy: {
+              name: "Robert Johnson",
+              avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=robert",
+              initials: "RJ",
+            },
+            createdAt: "2023-06-14T11:20:00Z",
+            sourceStoreroom: "Supply Closet",
+          },
+        ]);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchPendingApprovals();
+  }, [initialTransactions]);
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "pending":
@@ -129,6 +262,24 @@ const PendingApprovals = ({
       minute: "2-digit",
     }).format(date);
   };
+
+  if (isLoading) {
+    return (
+      <Card className="w-full bg-white bg-opacity-10 backdrop-blur-md border border-gray-200 border-opacity-20 shadow-lg">
+        <CardHeader>
+          <CardTitle className="text-xl font-bold flex items-center">
+            <Clock className="mr-2 h-5 w-5 text-yellow-500" />
+            Pending Approvals
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="w-full bg-white bg-opacity-10 backdrop-blur-md border border-gray-200 border-opacity-20 shadow-lg">
