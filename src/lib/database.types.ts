@@ -205,9 +205,8 @@ export interface Database {
           item_id: string;
           quantity: number;
           unit_price: number | null;
-          direction: string | null;
-          purpose: string | null;
-          created_at: string;
+          total_price: number | null;
+          notes: string | null;
         };
         Insert: {
           id?: string;
@@ -215,9 +214,8 @@ export interface Database {
           item_id: string;
           quantity: number;
           unit_price?: number | null;
-          direction?: string | null;
-          purpose?: string | null;
-          created_at?: string;
+          total_price?: number | null;
+          notes?: string | null;
         };
         Update: {
           id?: string;
@@ -225,9 +223,34 @@ export interface Database {
           item_id?: string;
           quantity?: number;
           unit_price?: number | null;
-          direction?: string | null;
-          purpose?: string | null;
-          created_at?: string;
+          total_price?: number | null;
+          notes?: string | null;
+        };
+      };
+      approvals: {
+        Row: {
+          id: string;
+          transaction_id: string;
+          approver_id: string;
+          status: 'pending' | 'approved' | 'rejected';
+          comments: string | null;
+          approved_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          transaction_id: string;
+          approver_id: string;
+          status?: 'pending' | 'approved' | 'rejected';
+          comments?: string | null;
+          approved_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          transaction_id?: string;
+          approver_id?: string;
+          status?: 'pending' | 'approved' | 'rejected';
+          comments?: string | null;
+          approved_at?: string | null;
         };
       };
       approval_workflows: {
@@ -294,6 +317,12 @@ export interface Database {
           uploaded_at?: string;
         };
       };
+    };
+    Views: {
+      // Add any database views if needed
+    };
+    Functions: {
+      // Add any custom database functions if needed
     };
   };
 }

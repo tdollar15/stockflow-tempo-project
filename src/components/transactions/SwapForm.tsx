@@ -1,10 +1,11 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { RefreshCw, Upload, X } from "lucide-react";
+import { RefreshCw, Upload, X, HelpCircle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 
 import { Button } from "../ui/button";
 import {
@@ -34,44 +35,74 @@ import {
 } from "../ui/form";
 import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
+import { TransactionWorkflow, TransactionType, TransactionStage, UserRole } from './TransactionWorkflow';
 
 // Define the schema for swap form validation
 const swapFormSchema = z
   .object({
-    requestedBy: z.string().min(1, { message: "Requester name is required" }),
+    requestedBy: z.string()
+      .min(2, { message: "Requester name must be at least 2 characters" })
+      .max(50, { message: "Requester name cannot exceed 50 characters" }),
     sourceStoreroomId: z
       .string()
       .min(1, { message: "Source storeroom is required" }),
     destStoreroomId: z
       .string()
-      .min(1, { message: "Destination storeroom is required" }),
-    swapDate: z.string().min(1, { message: "Swap date is required" }),
+      .min(1, { message: "Destination storeroom is required" })
+      .refine(
+        (destStoreroomId: string, ctx: { parent: { sourceStoreroomId: string } }) => {
+          return destStoreroomId !== ctx.parent.sourceStoreroomId;
+        },
+        { message: "Source and destination storerooms must be different" }
+      ),
+    swapDate: z.string()
+      .refine(
+        (date: string) => {
+          const inputDate = new Date(date);
+          const today = new Date();
+          const maxFutureDate = new Date();
+          maxFutureDate.setDate(today.getDate() + 30);
+          return inputDate >= today && inputDate <= maxFutureDate;
+        },
+        { message: "Swap date must be today or within the next 30 days" }
+      ),
     outgoingItems: z
       .array(
         z.object({
-          itemId: z.string().min(1, { message: "Item is required" }),
-          quantity: z
-            .number()
-            .min(1, { message: "Quantity must be at least 1" }),
-        }),
+          itemId: z.string().min(1, { message: "Outgoing item is required" }),
+          quantity: z.number()
+            .min(1, { message: "Quantity must be at least 1" })
+            .max(100, { message: "Quantity cannot exceed 100" }),
+          swapReason: z.string()
+            .max(200, { message: "Swap reason cannot exceed 200 characters" })
+            .optional(),
+        })
       )
-      .min(1, { message: "At least one outgoing item is required" }),
+      .min(1, { message: "At least one outgoing item is required" })
+      .max(10, { message: "Maximum of 10 outgoing items allowed" }),
     incomingItems: z
       .array(
         z.object({
-          itemId: z.string().min(1, { message: "Item is required" }),
-          quantity: z
-            .number()
-            .min(1, { message: "Quantity must be at least 1" }),
-        }),
+          itemId: z.string().min(1, { message: "Incoming item is required" }),
+          quantity: z.number()
+            .min(1, { message: "Quantity must be at least 1" })
+            .max(100, { message: "Quantity cannot exceed 100" }),
+        })
       )
-      .min(1, { message: "At least one incoming item is required" }),
-    justification: z.string().min(1, { message: "Justification is required" }),
+      .min(1, { message: "At least one incoming item is required" })
+      .max(10, { message: "Maximum of 10 incoming items allowed" }),
+    notes: z.string()
+      .max(500, { message: "Notes cannot exceed 500 characters" })
+      .optional(),
+    stage: z.nativeEnum(TransactionStage),
   })
-  .refine((data) => data.sourceStoreroomId !== data.destStoreroomId, {
-    message: "Source and destination storerooms must be different",
-    path: ["destStoreroomId"],
-  });
+  .refine(
+    (data: any) => {
+      // Optional: Add a check to ensure total value of outgoing and incoming items is balanced
+      return true; // Placeholder for more complex validation
+    },
+    { message: "Swap items must be of equivalent value" }
+  );
 
 type SwapFormValues = z.infer<typeof swapFormSchema>;
 
@@ -95,14 +126,19 @@ interface SwapFormProps {
   storerooms?: typeof defaultStorerooms;
   onSubmit?: (values: SwapFormValues) => void;
   isLoading?: boolean;
+  initialStage?: TransactionStage;
+  userRole?: UserRole;
 }
 
 const SwapForm = ({
   items = defaultItems,
   storerooms = defaultStorerooms,
-  onSubmit = (values) => console.log("Swap submitted:", values),
+  onSubmit = (values: SwapFormValues) => console.log("Swap submitted:", values),
   isLoading = false,
+  initialStage = TransactionStage.Draft,
+  userRole = UserRole.Supervisor,
 }: SwapFormProps) => {
+  const [currentStage, setCurrentStage] = useState<TransactionStage>(initialStage);
   const form = useForm<SwapFormValues>({
     resolver: zodResolver(swapFormSchema),
     defaultValues: {
@@ -110,9 +146,10 @@ const SwapForm = ({
       sourceStoreroomId: "",
       destStoreroomId: "",
       swapDate: new Date().toISOString().split("T")[0],
-      outgoingItems: [{ itemId: "", quantity: 1 }],
+      outgoingItems: [{ itemId: "", quantity: 1, swapReason: "" }],
       incomingItems: [{ itemId: "", quantity: 1 }],
-      justification: "",
+      notes: "",
+      stage: initialStage,
     },
   });
 
@@ -128,16 +165,24 @@ const SwapForm = ({
     remove: removeIncoming,
   } = form.control._fields.incomingItems || [];
 
-  const handleSubmit = (values: SwapFormValues) => {
-    onSubmit(values);
-    // Don't reset the form if we're in a loading state
-    if (!isLoading) {
-      form.reset();
+  const handleSubmit = async (values: SwapFormValues) => {
+    try {
+      await onSubmit({
+        ...values,
+        stage: currentStage,
+      });
+    } catch (error) {
+      console.error("Submission error:", error);
     }
   };
 
+  const handleStageChange = (newStage: TransactionStage) => {
+    setCurrentStage(newStage);
+    form.setValue('stage', newStage);
+  };
+
   const addOutgoingItem = () => {
-    appendOutgoing({ itemId: "", quantity: 1 });
+    appendOutgoing({ itemId: "", quantity: 1, swapReason: "" });
   };
 
   const addIncomingItem = () => {
@@ -161,10 +206,7 @@ const SwapForm = ({
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form
-            onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-6"
-          >
+          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField
                 control={form.control}
@@ -344,6 +386,26 @@ const SwapForm = ({
                           )}
                         />
                       </div>
+
+                      <div className="w-full md:w-48">
+                        <FormField
+                          control={form.control}
+                          name={`outgoingItems.${index}.swapReason`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Swap Reason</FormLabel>
+                              <FormControl>
+                                <Input
+                                  type="text"
+                                  placeholder="Enter swap reason"
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
                     </div>
                   ))}
               </div>
@@ -443,23 +505,28 @@ const SwapForm = ({
 
             <FormField
               control={form.control}
-              name="justification"
+              name="notes"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Justification for Swap</FormLabel>
+                  <FormLabel>Notes</FormLabel>
                   <FormControl>
                     <Textarea
-                      placeholder="Explain why this swap is necessary"
+                      placeholder="Enter any additional notes"
                       {...field}
                     />
                   </FormControl>
-                  <FormDescription>
-                    Provide detailed reasoning for why these items need to be
-                    exchanged
-                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
+            />
+
+            <TransactionWorkflow
+              transactionType={TransactionType.Swap}
+              initialStage={initialStage}
+              userRole={userRole}
+              transactionData={form.getValues()}
+              onStageChange={handleStageChange}
+              onSubmit={handleSubmit}
             />
 
             <div className="flex justify-between items-center">

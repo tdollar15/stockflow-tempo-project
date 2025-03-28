@@ -1,22 +1,49 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClientOptions } from "@supabase/supabase-js";
 import { Database } from "./database.types";
 
-// Create a single supabase client for interacting with your database
-const supabaseUrl = "https://hfgtxcpkhcnwdsyjbojs.supabase.co";
-const supabaseAnonKey =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhmZ3R4Y3BraGNud2RzeWpib2pzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDIwMTQzMzksImV4cCI6MjA1NzU5MDMzOX0.Vhm8Xh88m2O8bwXYNAaIan260EU9H8axiAv-25UoPUM";
+// Use environment variables for configuration
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+// Connection pooling configuration
+const connectionOptions: SupabaseClientOptions<"public"> = {
+  auth: {
+    persistSession: true,
+  },
+};
 
-// Helper functions for common database operations
+// Create a robust Supabase client
+export const supabase = createClient<Database>(
+  supabaseUrl, 
+  supabaseAnonKey, 
+  connectionOptions
+);
 
-// Inventory related functions
+// Enhanced error handling utility
+export function handleSupabaseError(error: any, context: string) {
+  console.error(`Supabase Error (${context}):`, error);
+  
+  // Categorize and handle different types of errors
+  switch (error.code) {
+    case 'PGRST116':  // No rows returned
+      return { data: null, error: null };
+    case 'AUTH_ERROR':
+      throw new Error('Authentication failed');
+    case 'NETWORK_ERROR':
+      throw new Error('Network connection issue');
+    default:
+      throw error;
+  }
+}
+
+// Inventory related functions with improved error handling
 export async function getInventoryItems() {
   if (!supabase) {
     throw new Error("Supabase client not initialized");
   }
 
-  const { data, error } = await supabase.from("inventory").select(`
+  try {
+    const { data, error } = await supabase.from("inventory").select(`
       id,
       item_id,
       storeroom_id,
@@ -28,28 +55,27 @@ export async function getInventoryItems() {
       storerooms(id, name, location)
     `);
 
-  if (error) {
-    console.error("Error fetching inventory:", error);
-    throw error;
+    if (error) return handleSupabaseError(error, 'getInventoryItems');
+    return data;
+  } catch (error) {
+    handleSupabaseError(error, 'getInventoryItems');
   }
-
-  return data;
 }
 
-// Storeroom related functions
+// Storeroom related functions with improved error handling
 export async function getStorerooms() {
   if (!supabase) {
     throw new Error("Supabase client not initialized");
   }
 
-  const { data, error } = await supabase.from("storerooms").select("*");
+  try {
+    const { data, error } = await supabase.from("storerooms").select("*");
 
-  if (error) {
-    console.error("Error fetching storerooms:", error);
-    throw error;
+    if (error) return handleSupabaseError(error, 'getStorerooms');
+    return data;
+  } catch (error) {
+    handleSupabaseError(error, 'getStorerooms');
   }
-
-  return data;
 }
 
 // Item related functions
@@ -58,14 +84,14 @@ export async function getItems() {
     throw new Error("Supabase client not initialized");
   }
 
-  const { data, error } = await supabase.from("items").select("*");
+  try {
+    const { data, error } = await supabase.from("items").select("*");
 
-  if (error) {
-    console.error("Error fetching items:", error);
-    throw error;
+    if (error) return handleSupabaseError(error, 'getItems');
+    return data;
+  } catch (error) {
+    handleSupabaseError(error, 'getItems');
   }
-
-  return data;
 }
 
 // Category related functions
@@ -74,14 +100,14 @@ export async function getCategories() {
     throw new Error("Supabase client not initialized");
   }
 
-  const { data, error } = await supabase.from("categories").select("*");
+  try {
+    const { data, error } = await supabase.from("categories").select("*");
 
-  if (error) {
-    console.error("Error fetching categories:", error);
-    throw error;
+    if (error) return handleSupabaseError(error, 'getCategories');
+    return data;
+  } catch (error) {
+    handleSupabaseError(error, 'getCategories');
   }
-
-  return data;
 }
 
 // User related functions
@@ -90,14 +116,14 @@ export async function getUsers() {
     throw new Error("Supabase client not initialized");
   }
 
-  const { data, error } = await supabase.from("users").select("*");
+  try {
+    const { data, error } = await supabase.from("users").select("*");
 
-  if (error) {
-    console.error("Error fetching users:", error);
-    throw error;
+    if (error) return handleSupabaseError(error, 'getUsers');
+    return data;
+  } catch (error) {
+    handleSupabaseError(error, 'getUsers');
   }
-
-  return data;
 }
 
 // Authentication functions
@@ -106,17 +132,17 @@ export async function signIn(email: string, password: string) {
     throw new Error("Supabase client not initialized");
   }
 
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-  if (error) {
-    console.error("Error signing in:", error);
-    throw error;
+    if (error) return handleSupabaseError(error, 'signIn');
+    return data;
+  } catch (error) {
+    handleSupabaseError(error, 'signIn');
   }
-
-  return data;
 }
 
 export async function signOut() {
@@ -124,11 +150,12 @@ export async function signOut() {
     throw new Error("Supabase client not initialized");
   }
 
-  const { error } = await supabase.auth.signOut();
+  try {
+    const { error } = await supabase.auth.signOut();
 
-  if (error) {
-    console.error("Error signing out:", error);
-    throw error;
+    if (error) return handleSupabaseError(error, 'signOut');
+  } catch (error) {
+    handleSupabaseError(error, 'signOut');
   }
 }
 
@@ -137,18 +164,18 @@ export async function getUserRole(userId: string) {
     throw new Error("Supabase client not initialized");
   }
 
-  const { data, error } = await supabase
-    .from("users")
-    .select("role")
-    .eq("id", userId)
-    .single();
+  try {
+    const { data, error } = await supabase
+      .from("users")
+      .select("role")
+      .eq("id", userId)
+      .single();
 
-  if (error) {
-    console.error("Error fetching user role:", error);
-    throw error;
+    if (error) return handleSupabaseError(error, 'getUserRole');
+    return data?.role ?? null;
+  } catch (error) {
+    handleSupabaseError(error, 'getUserRole');
   }
-
-  return data?.role;
 }
 
 // Transaction related functions
@@ -157,17 +184,17 @@ export async function createTransaction(transactionData: any) {
     throw new Error("Supabase client not initialized");
   }
 
-  const { data, error } = await supabase
-    .from("transactions")
-    .insert(transactionData)
-    .select();
+  try {
+    const { data, error } = await supabase
+      .from("transactions")
+      .insert(transactionData)
+      .select();
 
-  if (error) {
-    console.error("Error creating transaction:", error);
-    throw error;
+    if (error) return handleSupabaseError(error, 'createTransaction');
+    return data;
+  } catch (error) {
+    handleSupabaseError(error, 'createTransaction');
   }
-
-  return data;
 }
 
 export async function getTransactionItems(transactionId: string) {
@@ -175,15 +202,15 @@ export async function getTransactionItems(transactionId: string) {
     throw new Error("Supabase client not initialized");
   }
 
-  const { data, error } = await supabase
-    .from("transaction_items")
-    .select("*")
-    .eq("transaction_id", transactionId);
+  try {
+    const { data, error } = await supabase
+      .from("transaction_items")
+      .select("*")
+      .eq("transaction_id", transactionId);
 
-  if (error) {
-    console.error("Error fetching transaction items:", error);
-    throw error;
+    if (error) return handleSupabaseError(error, 'getTransactionItems');
+    return data;
+  } catch (error) {
+    handleSupabaseError(error, 'getTransactionItems');
   }
-
-  return data;
 }

@@ -1,10 +1,11 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { PackagePlus, Upload, X } from "lucide-react";
+import { PackagePlus, Upload, X, HelpCircle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 
 import { Button } from "../ui/button";
 import {
@@ -34,29 +35,50 @@ import {
 } from "../ui/form";
 import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
+import { TransactionWorkflow, TransactionType, TransactionStage, UserRole } from './TransactionWorkflow';
 
 // Define the schema for receipt form validation
 const receiptFormSchema = z.object({
-  supplierName: z.string().min(1, { message: "Supplier name is required" }),
+  supplierName: z.string()
+    .min(2, { message: "Supplier name must be at least 2 characters" })
+    .max(100, { message: "Supplier name cannot exceed 100 characters" }),
   supplierReference: z
     .string()
-    .min(1, { message: "Reference number is required" }),
+    .min(3, { message: "Reference number must be at least 3 characters" })
+    .max(50, { message: "Reference number cannot exceed 50 characters" })
+    .regex(/^[A-Za-z0-9-]+$/, { message: "Reference number can only contain letters, numbers, and hyphens" }),
   destStoreroomId: z
     .string()
     .min(1, { message: "Destination storeroom is required" }),
-  deliveryDate: z.string().min(1, { message: "Delivery date is required" }),
+  deliveryDate: z.string()
+    .refine(
+      (date) => {
+        const inputDate = new Date(date);
+        const today = new Date();
+        const maxPastDate = new Date();
+        maxPastDate.setDate(today.getDate() - 30);
+        return inputDate <= today && inputDate >= maxPastDate;
+      },
+      { message: "Delivery date must be today or within the last 30 days" }
+    ),
   items: z
     .array(
       z.object({
         itemId: z.string().min(1, { message: "Item is required" }),
-        quantity: z.number().min(1, { message: "Quantity must be at least 1" }),
-        unitPrice: z
-          .number()
-          .min(0, { message: "Unit price must be at least 0" }),
-      }),
+        quantity: z.number()
+          .min(1, { message: "Quantity must be at least 1" })
+          .max(1000, { message: "Quantity cannot exceed 1000" }),
+        unitPrice: z.number()
+          .min(0, { message: "Unit price cannot be negative" })
+          .max(100000, { message: "Unit price is unreasonably high" }),
+      })
     )
-    .min(1, { message: "At least one item is required" }),
-  notes: z.string().optional(),
+    .min(1, { message: "At least one item is required" })
+    .max(50, { message: "Maximum of 50 items allowed per receipt" }),
+  notes: z.string()
+    .max(500, { message: "Notes cannot exceed 500 characters" })
+    .optional(),
+  stage: z.nativeEnum(TransactionStage),
 });
 
 type ReceiptFormValues = z.infer<typeof receiptFormSchema>;
@@ -81,14 +103,19 @@ interface ReceiptFormProps {
   storerooms?: typeof defaultStorerooms;
   onSubmit?: (values: ReceiptFormValues) => void;
   isLoading?: boolean;
+  initialStage?: TransactionStage;
+  userRole?: UserRole;
 }
 
 const ReceiptForm = ({
   items = defaultItems,
   storerooms = defaultStorerooms,
-  onSubmit = (values) => console.log("Receipt submitted:", values),
+  onSubmit = (values: ReceiptFormValues) => console.log("Receipt submitted:", values),
   isLoading = false,
+  initialStage = TransactionStage.Draft,
+  userRole = UserRole.Clerk,
 }: ReceiptFormProps) => {
+  const [currentStage, setCurrentStage] = useState<TransactionStage>(initialStage);
   const form = useForm<ReceiptFormValues>({
     resolver: zodResolver(receiptFormSchema),
     defaultValues: {
@@ -98,17 +125,26 @@ const ReceiptForm = ({
       deliveryDate: new Date().toISOString().split("T")[0],
       items: [{ itemId: "", quantity: 1, unitPrice: 0 }],
       notes: "",
+      stage: initialStage,
     },
   });
 
   const { fields, append, remove } = form.control._fields.items || [];
 
-  const handleSubmit = (values: ReceiptFormValues) => {
-    onSubmit(values);
-    // Don't reset the form if we're in a loading state
-    if (!isLoading) {
-      form.reset();
+  const handleSubmit = async (values: ReceiptFormValues) => {
+    try {
+      await onSubmit({
+        ...values,
+        stage: currentStage,
+      });
+    } catch (error) {
+      console.error("Submission error:", error);
     }
+  };
+
+  const handleStageChange = (newStage: TransactionStage) => {
+    setCurrentStage(newStage);
+    form.setValue('stage', newStage);
   };
 
   const addItem = () => {
@@ -134,10 +170,7 @@ const ReceiptForm = ({
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form
-            onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-6"
-          >
+          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField
                 control={form.control}
@@ -336,16 +369,36 @@ const ReceiptForm = ({
               name="notes"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Notes</FormLabel>
+                  <div className="flex items-center gap-2">
+                    <FormLabel>Additional Notes</FormLabel>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger><HelpCircle className="h-4 w-4 text-gray-500" /></TooltipTrigger>
+                        <TooltipContent>
+                          <p>Optional notes about the receipt. Use this to provide additional context or special instructions.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
                   <FormControl>
-                    <Textarea
-                      placeholder="Add any additional information about this receipt"
-                      {...field}
+                    <Textarea 
+                      placeholder="Add any additional information about this receipt" 
+                      {...field} 
+                      className="min-h-[100px]"
                     />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
+            />
+
+            <TransactionWorkflow
+              transactionType={TransactionType.Receipt}
+              initialStage={initialStage}
+              userRole={userRole}
+              transactionData={form.getValues()}
+              onStageChange={handleStageChange}
+              onSubmit={handleSubmit}
             />
 
             <div className="flex justify-between items-center">

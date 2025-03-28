@@ -20,8 +20,9 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Eye, EyeOff, Lock, Mail, User } from "lucide-react";
-import { signIn } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase-client";
 import { useToast } from "../ui/use-toast";
+import { useRouter } from "next/navigation";
 
 interface LoginFormProps {
   onSubmit?: (data: { email: string; password: string; role: string }) => void;
@@ -46,20 +47,23 @@ const LoginForm = ({
     { id: "supplier_supervisor", name: "Supplier Supervisor" },
   ]);
   const { toast } = useToast();
+  const router = useRouter();
 
   // Fetch roles from Supabase
   useEffect(() => {
     const fetchRoles = async () => {
       try {
-        // In a real implementation, you would fetch roles from Supabase
-        // For now, we'll use the hardcoded roles above
-        // const { data } = await supabase.from('roles').select('*');
-        // if (data) setRoles(data);
-      } catch (error) {
+        // Fetch roles from Supabase roles table
+        const { data, error } = await supabase.from('roles').select('*');
+        if (error) throw error;
+        if (data && data.length > 0) {
+          setRoles(data.map(r => ({ id: r.id, name: r.name })));
+        }
+      } catch (error: any) {
         console.error("Error fetching roles:", error);
         toast({
           title: "Error",
-          description: "Failed to load user roles. Please try again later.",
+          description: "Failed to load user roles. Using default roles.",
           variant: "destructive",
         });
       }
@@ -73,23 +77,44 @@ const LoginForm = ({
     setIsLoading(true);
 
     try {
-      // In a real implementation, we would use Supabase Auth
-      // const { user } = await signIn(email, password);
-      // if (user) {
-      //   // Get user role from the users table
-      //   const { data: userData } = await supabase
-      //     .from('users')
-      //     .select('role')
-      //     .eq('id', user.id)
-      //     .single();
-      //
-      //   // Use the role from the database or fallback to the selected role
-      //   const userRole = userData?.role || role;
-      //   onSubmit({ email, password, role: userRole });
-      // }
+      // Authenticate with Supabase
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-      // For now, we'll just pass the selected role
-      onSubmit({ email, password, role });
+      if (error) throw error;
+
+      // Fetch user role from profiles table
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', data.user?.id)
+        .single();
+
+      if (profileError) throw profileError;
+
+      // Use the role from the database or fallback to the selected role
+      const userRole = profileData?.role || role;
+
+      // Store session in localStorage for persistence
+      localStorage.setItem('supabase_session', JSON.stringify(data.session));
+
+      // Call onSubmit with user data
+      onSubmit({ 
+        email, 
+        password, 
+        role: userRole 
+      });
+
+      // Redirect to dashboard or home page
+      router.push('/dashboard');
+
+      toast({
+        title: "Login Successful",
+        description: `Welcome, ${userRole}!`,
+        variant: "default",
+      });
     } catch (error: any) {
       console.error("Login error:", error);
       toast({
@@ -178,34 +203,22 @@ const LoginForm = ({
                 </Select>
               </div>
             </div>
-            <Button
-              type="submit"
-              className="w-full transition-transform hover:scale-105 active:scale-95"
+            <Button 
+              type="submit" 
+              className="w-full" 
               disabled={isLoading}
             >
-              {isLoading ? (
-                <>
-                  <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
-                  Signing in...
-                </>
-              ) : (
-                "Sign In"
-              )}
+              {isLoading ? "Logging in..." : "Log In"}
             </Button>
           </form>
         </CardContent>
-        <CardFooter className="flex flex-col space-y-2">
-          <div className="text-sm text-center text-muted-foreground">
-            <a
-              href="#"
-              className="hover:text-primary underline underline-offset-4"
-            >
-              Forgot password?
-            </a>
-          </div>
-          <div className="text-sm text-center text-muted-foreground">
-            Don&apos;t have an account? Contact your administrator
-          </div>
+        <CardFooter className="justify-center">
+          <Button 
+            variant="link" 
+            onClick={() => router.push('/forgot-password')}
+          >
+            Forgot Password?
+          </Button>
         </CardFooter>
       </Card>
     </div>

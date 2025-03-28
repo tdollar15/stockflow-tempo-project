@@ -1,10 +1,11 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowRight, Upload, X } from "lucide-react";
+import { ArrowRight, Upload, X, HelpCircle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 
 import { Button } from "../ui/button";
 import {
@@ -34,33 +35,56 @@ import {
 } from "../ui/form";
 import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
+import { TransactionWorkflow, TransactionType, TransactionStage, UserRole } from './TransactionWorkflow';
 
 // Define the schema for transfer form validation
 const transferFormSchema = z
   .object({
-    requestedBy: z.string().min(1, { message: "Requester name is required" }),
+    requestedBy: z.string()
+      .min(2, { message: "Requester name must be at least 2 characters" })
+      .max(50, { message: "Requester name cannot exceed 50 characters" }),
     sourceStoreroomId: z
       .string()
       .min(1, { message: "Source storeroom is required" }),
     destStoreroomId: z
       .string()
-      .min(1, { message: "Destination storeroom is required" }),
-    transferDate: z.string().min(1, { message: "Transfer date is required" }),
+      .min(1, { message: "Destination storeroom is required" })
+      .refine(
+        (destStoreroomId: string, ctx: { parent: { sourceStoreroomId: string } }) => {
+          return destStoreroomId !== ctx.parent.sourceStoreroomId;
+        },
+        { message: "Source and destination storerooms must be different" }
+      ),
+    transferDate: z.string()
+      .refine(
+        (date) => {
+          const inputDate = new Date(date);
+          const today = new Date();
+          const maxFutureDate = new Date();
+          maxFutureDate.setDate(today.getDate() + 30);
+          return inputDate >= today && inputDate <= maxFutureDate;
+        },
+        { message: "Transfer date must be today or within the next 30 days" }
+      ),
     items: z
       .array(
         z.object({
           itemId: z.string().min(1, { message: "Item is required" }),
-          quantity: z
-            .number()
-            .min(1, { message: "Quantity must be at least 1" }),
-        }),
+          quantity: z.number()
+            .min(1, { message: "Quantity must be at least 1" })
+            .max(500, { message: "Quantity cannot exceed 500" }),
+          transferReason: z.string()
+            .max(200, { message: "Transfer reason cannot exceed 200 characters" })
+            .optional(),
+        })
       )
-      .min(1, { message: "At least one item is required" }),
+      .min(1, { message: "At least one item is required" })
+      .max(20, { message: "Maximum of 20 items allowed per transfer" }),
     reason: z.string().min(1, { message: "Reason for transfer is required" }),
-  })
-  .refine((data) => data.sourceStoreroomId !== data.destStoreroomId, {
-    message: "Source and destination storerooms must be different",
-    path: ["destStoreroomId"],
+    notes: z.string()
+      .max(500, { message: "Notes cannot exceed 500 characters" })
+      .optional(),
+    stage: z.nativeEnum(TransactionStage),
   });
 
 type TransferFormValues = z.infer<typeof transferFormSchema>;
@@ -85,14 +109,19 @@ interface TransferFormProps {
   storerooms?: typeof defaultStorerooms;
   onSubmit?: (values: TransferFormValues) => void;
   isLoading?: boolean;
+  initialStage?: TransactionStage;
+  userRole?: UserRole;
 }
 
 const TransferForm = ({
   items = defaultItems,
   storerooms = defaultStorerooms,
-  onSubmit = (values) => console.log("Transfer submitted:", values),
+  onSubmit = (values: TransferFormValues) => console.log("Transfer submitted:", values),
   isLoading = false,
+  initialStage = TransactionStage.Draft,
+  userRole = UserRole.Storeman,
 }: TransferFormProps) => {
+  const [currentStage, setCurrentStage] = useState<TransactionStage>(initialStage);
   const form = useForm<TransferFormValues>({
     resolver: zodResolver(transferFormSchema),
     defaultValues: {
@@ -100,23 +129,33 @@ const TransferForm = ({
       sourceStoreroomId: "",
       destStoreroomId: "",
       transferDate: new Date().toISOString().split("T")[0],
-      items: [{ itemId: "", quantity: 1 }],
+      items: [{ itemId: "", quantity: 1, transferReason: "" }],
       reason: "",
+      notes: "",
+      stage: initialStage,
     },
   });
 
   const { fields, append, remove } = form.control._fields.items || [];
 
-  const handleSubmit = (values: TransferFormValues) => {
-    onSubmit(values);
-    // Don't reset the form if we're in a loading state
-    if (!isLoading) {
-      form.reset();
+  const handleSubmit = async (values: TransferFormValues) => {
+    try {
+      await onSubmit({
+        ...values,
+        stage: currentStage,
+      });
+    } catch (error) {
+      console.error("Submission error:", error);
     }
   };
 
+  const handleStageChange = (newStage: TransactionStage) => {
+    setCurrentStage(newStage);
+    form.setValue('stage', newStage);
+  };
+
   const addItem = () => {
-    append({ itemId: "", quantity: 1 });
+    append({ itemId: "", quantity: 1, transferReason: "" });
   };
 
   return (
@@ -136,10 +175,7 @@ const TransferForm = ({
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form
-            onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-6"
-          >
+          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField
                 control={form.control}
@@ -316,6 +352,25 @@ const TransferForm = ({
                           )}
                         />
                       </div>
+
+                      <div className="w-full md:w-48">
+                        <FormField
+                          control={form.control}
+                          name={`items.${index}.transferReason`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Transfer Reason</FormLabel>
+                              <FormControl>
+                                <Input
+                                  type="text"
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
                     </div>
                   ))}
               </div>
@@ -336,6 +391,32 @@ const TransferForm = ({
                   <FormMessage />
                 </FormItem>
               )}
+            />
+
+            <FormField
+              control={form.control}
+              name="notes"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Notes</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Add any additional notes"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <TransactionWorkflow
+              transactionType={TransactionType.Transfer}
+              initialStage={initialStage}
+              userRole={userRole}
+              transactionData={form.getValues()}
+              onStageChange={handleStageChange}
+              onSubmit={handleSubmit}
             />
 
             <div className="flex justify-between items-center">

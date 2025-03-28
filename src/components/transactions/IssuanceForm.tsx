@@ -1,10 +1,11 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Send, Upload, X } from "lucide-react";
+import { Send, Upload, X, HelpCircle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 
 import { Button } from "../ui/button";
 import {
@@ -34,25 +35,45 @@ import {
 } from "../ui/form";
 import { Textarea } from "../ui/textarea";
 import { Badge } from "../ui/badge";
+import { TransactionWorkflow, TransactionType, TransactionStage, UserRole } from './TransactionWorkflow';
 
 // Define the schema for issuance form validation
 const issuanceFormSchema = z.object({
-  requestedBy: z.string().min(1, { message: "Requester name is required" }),
+  requestedBy: z.string().min(1, { message: "Requester name is required" })
+    .max(50, { message: "Name must be 50 characters or less" }),
   department: z.string().min(1, { message: "Department is required" }),
   sourceStoreroomId: z
     .string()
     .min(1, { message: "Source storeroom is required" }),
-  requestDate: z.string().min(1, { message: "Request date is required" }),
+  requestDate: z.string()
+    .refine(
+      (date) => {
+        const inputDate = new Date(date);
+        const today = new Date();
+        const maxFutureDate = new Date();
+        maxFutureDate.setDate(today.getDate() + 30);
+        return inputDate >= today && inputDate <= maxFutureDate;
+      },
+      { message: "Request date must be today or within the next 30 days" }
+    ),
   items: z
     .array(
       z.object({
         itemId: z.string().min(1, { message: "Item is required" }),
-        quantity: z.number().min(1, { message: "Quantity must be at least 1" }),
-        purpose: z.string().min(1, { message: "Purpose is required" }),
-      }),
+        quantity: z.number()
+          .min(1, { message: "Quantity must be at least 1" })
+          .max(100, { message: "Quantity cannot exceed 100" }),
+        purpose: z.string()
+          .min(5, { message: "Purpose must be at least 5 characters" })
+          .max(200, { message: "Purpose cannot exceed 200 characters" }),
+      })
     )
-    .min(1, { message: "At least one item is required" }),
-  justification: z.string().min(1, { message: "Justification is required" }),
+    .min(1, { message: "At least one item is required" })
+    .max(10, { message: "Maximum of 10 items allowed per transaction" }),
+  justification: z.string()
+    .min(10, { message: "Justification must be at least 10 characters" })
+    .max(500, { message: "Justification cannot exceed 500 characters" }),
+  stage: z.nativeEnum(TransactionStage),
 });
 
 type IssuanceFormValues = z.infer<typeof issuanceFormSchema>;
@@ -87,15 +108,20 @@ interface IssuanceFormProps {
   departments?: typeof defaultDepartments;
   onSubmit?: (values: IssuanceFormValues) => void;
   isLoading?: boolean;
+  initialStage?: TransactionStage;
+  userRole?: UserRole;
 }
 
 const IssuanceForm = ({
   items = defaultItems,
   storerooms = defaultStorerooms,
   departments = defaultDepartments,
-  onSubmit = (values) => console.log("Issuance submitted:", values),
+  onSubmit = (values: IssuanceFormValues) => console.log("Issuance submitted:", values),
   isLoading = false,
+  initialStage = TransactionStage.Draft,
+  userRole = UserRole.Clerk,
 }: IssuanceFormProps) => {
+  const [currentStage, setCurrentStage] = useState<TransactionStage>(initialStage);
   const form = useForm<IssuanceFormValues>({
     resolver: zodResolver(issuanceFormSchema),
     defaultValues: {
@@ -105,21 +131,31 @@ const IssuanceForm = ({
       requestDate: new Date().toISOString().split("T")[0],
       items: [{ itemId: "", quantity: 1, purpose: "" }],
       justification: "",
+      stage: initialStage,
     },
   });
 
   const { fields, append, remove } = form.control._fields.items || [];
 
-  const handleSubmit = (values: IssuanceFormValues) => {
-    onSubmit(values);
-    // Don't reset the form if we're in a loading state
-    if (!isLoading) {
-      form.reset();
+  const addItem = () => {
+    append({ itemId: "", quantity: 1, purpose: "" });
+  };
+
+  const handleSubmit = async (values: IssuanceFormValues) => {
+    try {
+      await onSubmit({
+        ...values,
+        stage: currentStage,
+      });
+    } catch (error) {
+      // Handle submission error
+      console.error("Submission error:", error);
     }
   };
 
-  const addItem = () => {
-    append({ itemId: "", quantity: 1, purpose: "" });
+  const handleStageChange = (newStage: TransactionStage) => {
+    setCurrentStage(newStage);
+    form.setValue('stage', newStage);
   };
 
   return (
@@ -347,19 +383,36 @@ const IssuanceForm = ({
               name="justification"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Justification</FormLabel>
+                  <div className="flex items-center gap-2">
+                    <FormLabel>Justification</FormLabel>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger><HelpCircle className="h-4 w-4 text-gray-500" /></TooltipTrigger>
+                        <TooltipContent>
+                          <p>Provide a clear reason for this item issuance. This helps track and audit inventory movements.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
                   <FormControl>
-                    <Textarea
-                      placeholder="Provide detailed justification for this issuance request"
-                      {...field}
+                    <Textarea 
+                      placeholder="Explain the purpose and necessity of this item issuance" 
+                      {...field} 
+                      className="min-h-[100px]"
                     />
                   </FormControl>
-                  <FormDescription>
-                    Explain why these items are needed and how they will be used
-                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
+            />
+
+            <TransactionWorkflow
+              transactionType={TransactionType.Issuance}
+              initialStage={initialStage}
+              userRole={userRole}
+              transactionData={form.getValues()}
+              onStageChange={handleStageChange}
+              onSubmit={handleSubmit}
             />
 
             <div className="flex justify-between items-center">
