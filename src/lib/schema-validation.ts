@@ -74,27 +74,23 @@ export const TransactionStatusEnum = z.enum([
 
 // Transaction Item Schema
 export const TransactionItemSchema = z.object({
-  item_id: z.string().uuid('Invalid item ID'),
-  quantity: z.number()
-    .positive('Quantity must be a positive number')
-    .int('Quantity must be a whole number'),
-  unit_price: z.number()
-    .positive('Unit price must be a positive number')
-    .optional()
+  item_id: z.string(),
+  quantity: z.number().positive('Quantity must be positive'),
+  unit_price: z.number().optional()
 });
 
 // Create Transaction Schema with Comprehensive Validation
 export const CreateTransactionSchema = z.object({
   type: TransactionTypeEnum,
-  source_storeroom_id: z.string().uuid('Invalid source storeroom ID').optional().nullable(),
-  dest_storeroom_id: z.string().uuid('Invalid destination storeroom ID').optional().nullable(),
-  created_by: z.string().uuid('Invalid user ID'),
+  created_by: z.string(),
+  items: z.array(TransactionItemSchema)
+    .min(1, 'At least one transaction item is required')
+    .max(50, 'Maximum of 50 items per transaction'),
+  source_storeroom_id: z.string().optional().nullable(),
+  dest_storeroom_id: z.string().optional().nullable(),
   notes: z.string().max(500, 'Notes cannot exceed 500 characters').optional().nullable(),
   reference_number: z.string().optional().nullable(),
   supplier_name: z.string().optional().nullable(),
-  items: z.array(TransactionItemSchema)
-    .min(1, 'At least one transaction item is required')
-    .max(50, 'Maximum of 50 items per transaction')
 }).refine(
   (data) => {
     // Additional cross-field validations

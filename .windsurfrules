@@ -17,7 +17,7 @@
 
 **Development Workflow**
 
-* Never run a development server. Rather suggest to me to run the dev server myself, or ask permission to run the development server
+* Never run a development server, unless i specifically ask you to run the development server. You can also suggest to me to run the dev server when you see the need to test functionality
 * Never try to fix errors in the .md files in the docs folder or windsurf rules
 * Make only requested changes or changes you're confident are well understood and will not result in the change of the code
 * Consider what other code areas might be affected by your changes

@@ -1,42 +1,23 @@
 import { z } from 'zod';
 import { supabase } from './supabase-client';
-import { Database } from './database.types';
-import { RoleManager, roleManager } from './roles';
-
 import { 
-  TransactionSchema, 
-  TransactionTypeEnum, 
-  TransactionStatusEnum,
-  CreateTransactionSchema,
-  UpdateTransactionStatusSchema
+  CreateTransactionSchema, 
+  UpdateTransactionStatusSchema,
+  TransactionTypeEnum,
+  TransactionStatusEnum
 } from './schema-validation';
 
-// Transaction workflow stages
-export enum TransactionWorkflowStage {
-  DRAFT = 'draft',
-  PENDING_SUPERVISOR_APPROVAL = 'pending_supervisor',
-  PENDING_ADMIN_APPROVAL = 'pending_admin',
-  APPROVED = 'approved',
-  REJECTED = 'rejected',
-  COMPLETED = 'completed'
-}
-
-// Mapping workflow stages to old status types for compatibility
-const WORKFLOW_TO_STATUS_MAP: Record<TransactionWorkflowStage, string> = {
-  [TransactionWorkflowStage.DRAFT]: 'draft',
-  [TransactionWorkflowStage.PENDING_SUPERVISOR_APPROVAL]: 'pending',
-  [TransactionWorkflowStage.PENDING_ADMIN_APPROVAL]: 'pending',
-  [TransactionWorkflowStage.APPROVED]: 'approved',
-  [TransactionWorkflowStage.REJECTED]: 'rejected',
-  [TransactionWorkflowStage.COMPLETED]: 'completed'
-};
+import { transactionValidationService } from './services/TransactionValidationService';
+import { transactionStatusService, TransactionWorkflowStage } from './services/TransactionStatusService';
+import { toastService } from './services/ToastService';
+import { roleManager } from './roles';
 
 // Local type definitions
 export interface Transaction {
   id: string;
   transaction_number: string;
-  type: 'receipt' | 'issuance' | 'transfer' | 'adjustment';
-  status: TransactionWorkflowStage;
+  type: z.infer<typeof TransactionTypeEnum>;
+  status: z.infer<typeof TransactionStatusEnum>;
   source_storeroom_id?: string | null;
   dest_storeroom_id?: string | null;
   created_by: string;
@@ -109,8 +90,8 @@ export class TransactionService {
 
     if (filters.status) {
       // Convert status to workflow stage
-      const workflowStage = Object.keys(WORKFLOW_TO_STATUS_MAP)
-        .find(key => WORKFLOW_TO_STATUS_MAP[key as TransactionWorkflowStage] === filters.status);
+      const workflowStage = Object.keys(TransactionWorkflowStage)
+        .find(key => TransactionWorkflowStage[key as TransactionWorkflowStage] === filters.status);
       
       if (workflowStage) {
         query = query.eq('status', workflowStage);
@@ -142,179 +123,146 @@ export class TransactionService {
     };
   }
 
-  // Get detailed transaction view with role-based access control
-  async getTransactionDetails(userId: string, transactionId: string) {
-    const userRole = await this.roleManager.getUserRole(userId);
-    
-    const { data, error } = await supabase
-      .from('transactions')
-      .select(`
-        *,
-        transaction_items (
-          id,
-          inventory_item_id,
-          quantity,
-          unit_price
-        )
-      `)
-      .eq('id', transactionId)
-      .single();
-
-    if (error) throw error;
-
-    // Role-based access control for transaction details
-    switch (userRole) {
-      case 'storeman':
-        const assignedStorerooms = await this.roleManager.getAssignedStorerooms(userId);
-        if (!assignedStorerooms.includes(data.source_storeroom_id)) {
-          throw new Error('Unauthorized access to transaction');
-        }
-        break;
-      case 'supervisor':
-        const supervisorStorerooms = await this.roleManager.getManagedStorerooms(userId);
-        if (!supervisorStorerooms.includes(data.source_storeroom_id)) {
-          throw new Error('Unauthorized access to transaction');
-        }
-        break;
-      case 'admin':
-        // Admin can access all transactions
-        break;
-      default:
-        throw new Error('Insufficient permissions to view transaction details');
-    }
-
-    return data as Transaction & { transaction_items: TransactionItem[] };
-  }
-
-  // Create a transaction with role-based restrictions
+  // Create a new transaction with comprehensive validation
   async createTransaction(
-    userId: string, 
     transactionData: z.infer<typeof CreateTransactionSchema>
-  ) {
-    const userRole = await this.roleManager.getUserRole(userId);
+  ): Promise<Transaction> {
+    try {
+      // Validate transaction before creation
+      const isValid = await transactionValidationService.validateTransaction({
+        type: transactionData.type,
+        source_storeroom_id: transactionData.source_storeroom_id,
+        dest_storeroom_id: transactionData.dest_storeroom_id,
+        items: transactionData.items,
+        reference_number: transactionData.reference_number
+      });
 
-    // Only storemen and clerks can create transactions
-    if (!['storeman', 'clerk'].includes(userRole)) {
-      throw new Error('Unauthorized to create transactions');
+      if (!isValid) {
+        throw new Error('Transaction validation failed');
+      }
+
+      // Generate transaction number (mock implementation)
+      const transactionNumber = this.generateTransactionNumber(transactionData.type);
+
+      // Prepare transaction for database
+      const newTransaction: Omit<Transaction, 'id'> = {
+        transaction_number: transactionNumber,
+        type: transactionData.type,
+        status: 'draft',
+        source_storeroom_id: transactionData.source_storeroom_id || null,
+        dest_storeroom_id: transactionData.dest_storeroom_id || null,
+        created_by: transactionData.created_by,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        notes: transactionData.notes || null,
+        reference_number: transactionData.reference_number || null,
+        current_approver_role: null
+      };
+
+      const { data, error } = await supabase
+        .from('transactions')
+        .insert(newTransaction)
+        .select();
+
+      if (error) throw error;
+
+      // Show success toast
+      toastService.success(`Transaction ${transactionNumber} created successfully`);
+
+      return data[0] as Transaction;
+    } catch (error) {
+      // Log and rethrow error
+      console.error('Transaction creation failed', error);
+      toastService.error('Failed to create transaction');
+      throw error;
     }
-
-    // Validate transaction data
-    const validatedData = CreateTransactionSchema.parse({
-      ...transactionData,
-      created_by: userId,
-      status: TransactionWorkflowStage.DRAFT,
-      current_approver_role: 'supervisor'
-    });
-
-    const { data, error } = await supabase
-      .from('transactions')
-      .insert(validatedData)
-      .select();
-
-    if (error) throw error;
-
-    return data[0] as Transaction;
   }
 
-  // Update transaction status with multi-stage workflow
+  // Generate unique transaction number
+  private generateTransactionNumber(type: z.infer<typeof TransactionTypeEnum>): string {
+    const prefix = {
+      'receipt': 'RCP',
+      'issuance': 'ISS',
+      'transfer': 'TRF',
+      'adjustment': 'ADJ'
+    }[type];
+
+    const timestamp = new Date().getTime().toString().slice(-6);
+    return `${prefix}-${timestamp}`;
+  }
+
+  // Update transaction status using the new status service
   async updateTransactionStatus(
     userId: string,
     transactionId: string, 
-    status: z.infer<typeof TransactionStatusEnum>
-  ) {
-    const userRole = await this.roleManager.getUserRole(userId);
-    
-    // Fetch current transaction to determine workflow
-    const currentTransaction = await this.getTransactionDetails(userId, transactionId);
-
-    // Convert status to workflow stage
-    const workflowStage = Object.keys(WORKFLOW_TO_STATUS_MAP)
-      .find(key => WORKFLOW_TO_STATUS_MAP[key as TransactionWorkflowStage] === status);
-
-    if (!workflowStage) {
-      throw new Error('Invalid transaction status');
-    }
-
-    // Mutable variable for workflow stage
-    let currentWorkflowStage = workflowStage;
-
-    // Role-based status update logic
-    switch (currentTransaction.current_approver_role) {
-      case 'supervisor':
-        if (userRole !== 'supervisor') {
-          throw new Error('Only supervisors can approve this transaction');
-        }
-        // Move to admin approval if approved
-        if (currentWorkflowStage === TransactionWorkflowStage.APPROVED) {
-          currentWorkflowStage = TransactionWorkflowStage.PENDING_ADMIN_APPROVAL;
-        }
-        break;
-      case 'admin':
-        if (userRole !== 'admin') {
-          throw new Error('Only admins can give final approval');
-        }
-        break;
-      default:
-        throw new Error('Invalid transaction workflow stage');
-    }
-
-    const { data, error } = await supabase
-      .from('transactions')
-      .update({ 
-        status: currentWorkflowStage, 
-        updated_by: userId,
-        updated_at: new Date().toISOString(),
-        current_approver_role: currentWorkflowStage === TransactionWorkflowStage.PENDING_ADMIN_APPROVAL 
-          ? 'admin' 
-          : null
-      })
-      .eq('id', transactionId)
-      .select();
-
-    if (error) throw error;
-
-    return data[0] as Transaction;
+    statusUpdate: z.infer<typeof UpdateTransactionStatusSchema>
+  ): Promise<Transaction> {
+    return await transactionStatusService.updateTransactionStatus(
+      userId, 
+      transactionId, 
+      statusUpdate
+    );
   }
 
-  // Generate transaction status visualization data with role-based filtering
+  // Get transaction status summary
   async getTransactionStatusSummary(userId: string) {
-    const userRole = await this.roleManager.getUserRole(userId);
-    
-    let query = supabase.from('transactions').select('status');
+    return await transactionStatusService.getTransactionStatusSummary(userId);
+  }
 
-    // Role-based filtering for status summary
-    switch (userRole) {
-      case 'storeman':
-        const assignedStorerooms = await this.roleManager.getAssignedStorerooms(userId);
-        query = query.in('source_storeroom_id', assignedStorerooms);
-        break;
-      case 'supervisor':
-        const supervisorStorerooms = await this.roleManager.getManagedStorerooms(userId);
-        query = query.in('source_storeroom_id', supervisorStorerooms);
-        break;
-      case 'admin':
-        // Admin sees all transactions
-        break;
-      default:
-        throw new Error('Insufficient permissions to view transaction summary');
+  // Retrieve transaction details with role-based access
+  async getTransactionDetails(
+    userId: string, 
+    transactionId: string
+  ): Promise<Transaction & { transaction_items: TransactionItem[] }> {
+    try {
+      // Get user role
+      const userRole = await roleManager.getUserRole(userId);
+
+      // Base query for transaction details
+      let query = supabase
+        .from('transactions')
+        .select(`
+          *,
+          transaction_items (
+            id,
+            inventory_item_id,
+            quantity,
+            unit_price
+          )
+        `)
+        .eq('id', transactionId)
+        .single();
+
+      // Apply role-based filtering
+      switch (userRole) {
+        case 'storeman':
+          const assignedStorerooms = await roleManager.getAssignedStorerooms(userId);
+          query = query.in('source_storeroom_id', assignedStorerooms);
+          break;
+        case 'supervisor':
+          const supervisorStorerooms = await roleManager.getManagedStorerooms(userId);
+          query = query.in('source_storeroom_id', supervisorStorerooms);
+          break;
+        case 'admin':
+          // Admin can view all transactions
+          break;
+        default:
+          throw new Error('Insufficient permissions to view transaction details');
+      }
+
+      // Execute query
+      const { data, error } = await query;
+
+      if (error) throw error;
+      if (!data) throw new Error('Transaction not found');
+
+      return data as Transaction & { transaction_items: TransactionItem[] };
+    } catch (error) {
+      console.error('Failed to retrieve transaction details', error);
+      toastService.error('Unable to retrieve transaction details');
+      throw error;
     }
-
-    const { data, error } = await query;
-
-    if (error) throw error;
-
-    const statusCounts = data?.reduce((acc: Record<string, number>, transaction) => {
-      const mappedStatus = WORKFLOW_TO_STATUS_MAP[transaction.status as TransactionWorkflowStage];
-      acc[mappedStatus] = (acc[mappedStatus] || 0) + 1;
-      return acc;
-    }, {});
-
-    return {
-      statusCounts,
-      totalTransactions: data?.length || 0
-    };
   }
 }
 
-// Instantiate service
 export const transactionService = new TransactionService();
